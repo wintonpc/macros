@@ -1,10 +1,16 @@
 (require data/queue)
 
+;; process model
+
 (define *processes* '())
 (define *waiting* (make-queue))
 (define *ready* (make-queue))
 
 (struct process (id mailbox (thunk #:mutable) (alive #:mutable)) #:transparent)
+
+(define (next-id) (gensym))
+(define (make-mailbox) (make-queue))
+(define (new-process) (process (next-id) (make-mailbox) #f #t))
 
 (define (add-process p)
   (set! *processes* (cons p *processes*)))
@@ -12,17 +18,17 @@
 (define (remove-process p)
   (set! *processes* (remq p *processes*)))
 
-(define (dequeue-msg p)
-  (dequeue! (process-mailbox p)))
-
 (define (enqueue-msg p msg)
   (enqueue! (process-mailbox p) msg))
 
-(define (next-id) (gensym))
-(define (make-mailbox) (make-queue))
+(define (dequeue-msg p)
+  (dequeue! (process-mailbox p)))
+
+
+;; process engine
 
 (define (start-process code)
-  (let ([p (process (next-id) (make-mailbox) #f #t)]
+  (let ([p (new-process)]
         [yield #f])
     (define (receive)
       (call/cc yield)
@@ -30,31 +36,42 @@
     (define (call-with-updated-yield thunk)
       (call/cc
           (lambda (k)
+            (define (clean-up why)
+              (printf "process ~a ~a~n" (process-id p) why)
+              (set-process-alive! p #f)
+              (remove-process p))
             (set! yield k)
-            (thunk)
-            (printf "process ~a exited~n" (process-id p))
-            (set-process-alive! p #f)
-            (remove-process p))))
+            (with-handlers ([exn:fail? (lambda (raised) (clean-up "terminated due to exception") (raise raised))])
+              (thunk)
+              (clean-up "terminated")))))
     (define (run thunk)
       (let ([cont (call-with-updated-yield thunk)])
         (set-process-thunk! p (lambda () (run (lambda () (cont #f)))))))
 
     (add-process p)
-    (run (lambda () (code receive)))
+    (run (lambda () (code p receive)))
     p))
 
-(define (foo receive)
-  (printf "going to receive~n")
+(define (foo self receive)
+  (printf "foo: going to receive~n")
   (let ([msg (receive)])
-    (printf "received ~a~n" msg)
-    (printf "exiting~n")))
+    (printf "foo: received ~a~n" msg)
+    (printf "foo: exiting~n")))
 
-(define (bar receive)
+raise(define (crasher self receive)
+  (printf "crasher: going to receive~n")
+  (let ([msg (receive)])
+    (printf "crasher: received ~a~n" msg)
+    (error "oops")))
+
+(define (bar self receive)
   (define (go)
     (let ([msg (receive)])
-      (unless (string=? msg "exit")
-        (printf "bar received ~a~n" msg)
-        (go))))
+      (if (string=? msg "exit")
+          (error "we're done here")
+          (begin
+            (printf "bar received ~a~n" msg)
+            (go)))))
   (printf "starting receive loop~n")
   (go))
 
@@ -72,6 +89,14 @@
     (let ([p (dequeue! *ready*)])
       ((process-thunk p)))
     (run-ready)))
+
+
+(define (ping self receive)
+  (let ([pong (receive)])
+    (let lp ([n (receive)])
+      (printf "ping ~a~n" n))))
+
+(define (pong) #f)
 
 ;(define (send pid msg)
 ;  (let ([p (find-pid pid)])
