@@ -8,7 +8,7 @@
 
 (struct process (id mailbox (thunk #:mutable) (alive #:mutable)) #:transparent)
 
-(define (next-id) (gensym))
+(define (next-id) (string->symbol (symbol->string (gensym))))
 (define (make-mailbox) (make-queue))
 (define (new-process) (process (next-id) (make-mailbox) #f #t))
 
@@ -24,6 +24,9 @@
 (define (dequeue-msg p)
   (dequeue! (process-mailbox p)))
 
+(define (find-pid pid)
+  (let ([tail (memf (lambda (p) (eq? (process-id p) pid)) *processes*)])
+    (and tail (car tail))))
 
 ;; process engine
 
@@ -74,9 +77,6 @@ raise(define (crasher self receive)
             (go)))))
   (printf "starting receive loop~n")
   (go))
-
-(define (find-pid pid)
-  (memf (lambda (p) (eq? (process-id p) pid)) *processes*))
 
 (define (send p msg)
   (when (process-alive p)
