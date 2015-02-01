@@ -1,0 +1,31 @@
+(define (deep-find2 x pred)
+  (call/cc
+      (lambda (k)
+        (define (find x)
+          (printf "looking at ~a~n" x)
+          (if (not (list? x))
+              (when (pred x) (k x))
+              (map find x)))
+        (find x)
+        #f)))
+
+(define (deep-find3 x n pred)
+  (define (find-one)
+    (call/cc
+        (lambda (k)
+          (define (find x)
+            (printf "looking at ~a~n" x)
+            (if (not (list? x))
+                (when (pred x) (k x))
+                (map find x)))
+          (find x)
+          #f)))
+  (let lp ([founds '()])
+    (if (>= (length founds) n)
+        (reverse founds)
+        (let-values ([(found cont) (find-one)])
+          (if found
+              (lp (cons found founds))
+              founds)))))
+
+(define input '(2 4 (6 7 8) 10))

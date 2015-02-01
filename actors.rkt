@@ -1,9 +1,18 @@
 (require data/queue)
 
+;; util
+
+(define-syntax while
+  (syntax-rules ()
+    [(_ test expr ...)
+     (let lp ()
+       (when test
+         expr ...
+         (lp)))]))
+
 ;; process model
 
 (define *processes* '())
-(define *waiting* (make-queue))
 (define *ready* (make-queue))
 
 (struct process (id mailbox (thunk #:mutable) (alive #:mutable)) #:transparent)
@@ -18,6 +27,11 @@
 (define (remove-process p)
   (set! *processes* (remq p *processes*)))
 
+(define (continue-process p)
+  (if (process-alive p)
+      ((process-thunk p))
+      (error 'terminated)))
+
 (define (enqueue-msg p msg)
   (enqueue! (process-mailbox p) msg))
 
@@ -28,32 +42,60 @@
   (let ([tail (memf (lambda (p) (eq? (process-id p) pid)) *processes*)])
     (and tail (car tail))))
 
+(define (ready! p)
+  (enqueue! *ready* p))
+
+(define log printf)
+
 ;; process engine
 
-(define (start-process code)
+(define (start-process code . args)
   (let ([p (new-process)]
         [yield #f])
+    (define (run thunk)
+      (define (thunkify cont)
+        (lambda () (run (lambda () (cont #f)))))
+      (let ([cont (reenter thunk)])
+        (set-process-thunk! p (thunkify cont))))
+    (define (reenter thunk)
+      (call/cc
+          (lambda (k)
+            (set! yield k)
+            (with-handlers ([exn:fail? on-failure])
+              (thunk)
+              (clean-up "terminated")))))
+    (define (clean-up why)
+      (printf "process ~a ~a~n" (process-id p) why)
+      (set-process-alive! p #f)
+      (remove-process p))
+    (define (on-failure failure)
+      (clean-up "terminated due to exception")
+      (raise failure))
     (define (receive)
       (call/cc yield)
       (dequeue-msg p))
-    (define (call-with-updated-yield thunk)
-      (call/cc
-          (lambda (k)
-            (define (clean-up why)
-              (printf "process ~a ~a~n" (process-id p) why)
-              (set-process-alive! p #f)
-              (remove-process p))
-            (set! yield k)
-            (with-handlers ([exn:fail? (lambda (raised) (clean-up "terminated due to exception") (raise raised))])
-              (thunk)
-              (clean-up "terminated")))))
-    (define (run thunk)
-      (let ([cont (call-with-updated-yield thunk)])
-        (set-process-thunk! p (lambda () (run (lambda () (cont #f)))))))
 
     (add-process p)
-    (run (lambda () (code p receive)))
+    (set-process-thunk! p (lambda () (run (lambda () (apply code `(,p ,receive ,@args))))))
+    (ready! p)
+    (pump)
     p))
+
+(define (send p msg)
+  (when (process-alive p)
+    (enqueue-msg p msg)
+    (ready! p)
+    (pump)))
+
+(define pumping? (make-parameter #f))
+(define (pump)
+  (unless (pumping?)
+    (parameterize ([pumping? #t])
+      (while (non-empty-queue? *ready*)
+        (continue-process (dequeue! *ready*))))))
+
+
+;; example processes
 
 (define (foo self receive)
   (printf "foo: going to receive~n")
@@ -61,43 +103,33 @@
     (printf "foo: received ~a~n" msg)
     (printf "foo: exiting~n")))
 
-raise(define (crasher self receive)
-  (printf "crasher: going to receive~n")
-  (let ([msg (receive)])
-    (printf "crasher: received ~a~n" msg)
-    (error "oops")))
-
 (define (bar self receive)
   (define (go)
     (let ([msg (receive)])
-      (if (string=? msg "exit")
-          (error "we're done here")
-          (begin
-            (printf "bar received ~a~n" msg)
-            (go)))))
+      (case msg
+        [("exit") #f]
+        [("crash") (error "boom")]
+        [else
+         (begin
+           (printf "bar received ~a~n" msg)
+           (go))])))
   (printf "starting receive loop~n")
   (go))
 
-(define (send p msg)
-  (when (process-alive p)
-    (enqueue-msg p msg)
-    (enqueue! *ready* p)
-    (run-ready)))
 
-(define (run-ready)
-  (unless (queue-empty? *ready*)
-    (let ([p (dequeue! *ready*)])
-      ((process-thunk p)))
-    (run-ready)))
+(define (pinger self receive pong)
+  (send pong self)
+  (let lp ([n 1])
+    (when (< n 10)
+      (printf "ping ~a~n" n)
+      (send pong n)
+      (lp (+ (receive) 1)))))
 
-
-(define (ping self receive)
-  (let ([pong (receive)])
-    (let lp ([n (receive)])
-      (printf "ping ~a~n" n))))
-
-(define (pong) #f)
-
-;(define (send pid msg)
-;  (let ([p (find-pid pid)])
-;    (
+(define (ponger self receive)
+  (let ([ping (receive)])
+    (let lp ()
+      (let ([n (+ (receive) 1)])
+        (printf "pong: ~a~n" n)
+        (send ping n)
+        (lp)))))
+    

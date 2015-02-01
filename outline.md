@@ -1,0 +1,10 @@
+- exceptions
+- fibers (example in ruby)
+- what do they have in common? continuations
+- rethink both in terms of continuations
+- give each fiber a queue
+- hide the cooperation (yield -> receive)
+- actor model
+- advantages
+- demo in scheme
+- look at code
