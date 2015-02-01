@@ -1,29 +1,14 @@
+#lang racket
+
+(provide (all-defined-out))
+
 (require data/queue)
-
-;; util
-
-(define-syntax while
-  (syntax-rules ()
-    [(_ test expr ...)
-     (let lp ()
-       (when test
-         expr ...
-         (lp)))]))
+(require "util.rkt")
 
 ;; process model
 
 (define *processes* '())
 (define *ready* (make-queue))
-(define *self* (make-parameter #f))
-(define *receive* (make-parameter #f))
-
-(define-syntax (self stx)
-  (syntax-case stx ()
-    [_ #'(*self*)]))
-
-(define-syntax (receive stx)
-  (syntax-case stx ()
-    [(_) #'((*receive*))]))
 
 (struct process (id mailbox (thunk #:mutable) (alive #:mutable)) #:transparent)
 
@@ -36,11 +21,6 @@
 
 (define (remove-process p)
   (set! *processes* (remq p *processes*)))
-
-(define (continue-process p)
-  (if (process-alive p)
-      ((process-thunk p))
-      (error 'terminated)))
 
 (define (enqueue-msg p msg)
   (enqueue! (process-mailbox p) msg))
@@ -56,6 +36,21 @@
   (enqueue! *ready* p))
 
 (define log printf)
+
+
+;; ambient per-process variables and procedures
+
+(define *self* (make-parameter #f))
+(define *receive* (make-parameter #f))
+
+(define-syntax (self stx)
+  (syntax-case stx ()
+    [_ #'(*self*)]))
+
+(define-syntax (receive stx)
+  (syntax-case stx ()
+    [(_) #'((*receive*))]))
+
 
 ;; process engine
 
@@ -91,6 +86,11 @@
     (pump)
     p))
 
+(define (continue-process p)
+  (if (process-alive p)
+      ((process-thunk p))
+      (error 'terminated)))
+
 (define (send p msg)
   (when (process-alive p)
     (enqueue-msg p msg)
@@ -117,7 +117,7 @@
         (begin
           (printf "echo: ~a~n" msg)
           (go))])))
-  (printf "starting receive loop~n")
+  (printf "echo process started~n")
   (go))
 
 
