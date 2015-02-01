@@ -14,6 +14,16 @@
 
 (define *processes* '())
 (define *ready* (make-queue))
+(define *self* (make-parameter #f))
+(define *receive* (make-parameter #f))
+
+(define-syntax (self stx)
+  (syntax-case stx ()
+    [_ #'(*self*)]))
+
+(define-syntax (receive stx)
+  (syntax-case stx ()
+    [(_) #'((*receive*))]))
 
 (struct process (id mailbox (thunk #:mutable) (alive #:mutable)) #:transparent)
 
@@ -50,8 +60,7 @@
 ;; process engine
 
 (define (start-process code . args)
-  (let ([p (new-process)]
-        [yield #f])
+  (let ([p (new-process)])
     (define (run thunk)
       (define (thunkify cont)
         (lambda () (run (lambda () (cont #f)))))
@@ -59,11 +68,15 @@
         (set-process-thunk! p (thunkify cont))))
     (define (reenter thunk)
       (call/cc
-          (lambda (k)
-            (set! yield k)
-            (with-handlers ([exn:fail? on-failure])
-              (thunk)
-              (clean-up "terminated")))))
+          (lambda (yield)
+            (define (receive)
+              (call/cc yield)
+              (dequeue-msg p))
+            (parameterize ([*self* p]
+                           [*receive* receive])
+              (with-handlers ([exn:fail? on-failure])
+                (thunk)
+                (clean-up "terminated"))))))
     (define (clean-up why)
       (printf "process ~a ~a~n" (process-id p) why)
       (set-process-alive! p #f)
@@ -71,12 +84,9 @@
     (define (on-failure failure)
       (clean-up "terminated due to exception")
       (raise failure))
-    (define (receive)
-      (call/cc yield)
-      (dequeue-msg p))
 
     (add-process p)
-    (set-process-thunk! p (lambda () (run (lambda () (apply code `(,p ,receive ,@args))))))
+    (set-process-thunk! p (lambda () (run (lambda () (apply code args)))))
     (ready! p)
     (pump)
     p))
@@ -97,7 +107,7 @@
 
 ;; example processes
 
-(define (echo self receive)
+(define (echo)
   (define (go)
     (let ([msg (receive)])
       (cond
@@ -105,13 +115,13 @@
        [(eq? msg 'crash) (error "boom")]
        [else
         (begin
-          (printf "bar received ~a~n" msg)
+          (printf "echo: ~a~n" msg)
           (go))])))
   (printf "starting receive loop~n")
   (go))
 
 
-(define (pinger self receive pong)
+(define (pinger pong)
   (send pong self)
   (let lp ([n 1])
     (when (< n 10)
@@ -119,7 +129,7 @@
       (send pong n)
       (lp (+ (receive) 1)))))
 
-(define (ponger self receive)
+(define (ponger)
   (let ([ping (receive)])
     (let lp ()
       (let ([n (+ (receive) 1)])
