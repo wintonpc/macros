@@ -97,22 +97,16 @@
 
 ;; example processes
 
-(define (foo self receive)
-  (printf "foo: going to receive~n")
-  (let ([msg (receive)])
-    (printf "foo: received ~a~n" msg)
-    (printf "foo: exiting~n")))
-
-(define (bar self receive)
+(define (echo self receive)
   (define (go)
     (let ([msg (receive)])
-      (case msg
-        [("exit") #f]
-        [("crash") (error "boom")]
-        [else
-         (begin
-           (printf "bar received ~a~n" msg)
-           (go))])))
+      (cond
+       [(eq? msg 'exit) #f]
+       [(eq? msg 'crash) (error "boom")]
+       [else
+        (begin
+          (printf "bar received ~a~n" msg)
+          (go))])))
   (printf "starting receive loop~n")
   (go))
 
