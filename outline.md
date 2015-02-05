@@ -1,10 +1,29 @@
-- exceptions
-- fibers (example in ruby)
-- what do they have in common? continuations
-- rethink both in terms of continuations
-- give each fiber a queue
-- hide the cooperation (yield -> receive)
-- actor model
-- advantages
-- demo in scheme
-- look at code
+ideas:
+- rspec; use to test actor model
+- entity definition. using different macros, expand into
+  - entity struct
+    - with validation
+  - generative tests (using rspec clone)
+  - documentation
+- referee-like test DSL
+  - build up entities
+  - drive with rspec clone
+
+- Week 1
+  - Day 1: actor model
+    - exceptions
+      - fibers (example in ruby)
+      - what do they have in common? continuations
+      - rethink both in terms of continuations
+      - give each fiber a queue
+      - hide the cooperation (yield -> receive)
+      - actor model
+      - advantages
+      - demo in scheme
+      - look at code
+  - Day 2: rspec
+- Week 2
+  - Day 3: entity definitions
+- Week 3
+  - Day 4: cucumber
+  - Day 5: core rule tests
