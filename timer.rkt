@@ -19,9 +19,15 @@
       (let ([ms (max 0 (- (timer-abs-millis t) (current-milliseconds)))])
         (/ ms 1000)))
     (define (wait secs)
+      #;(printf "timer thread waiting with timeout ~a~n" secs)
       (if (sync/timeout secs (thread-receive-evt))
-          (add-timer (thread-receive))
-          (thread-send owner (heap-pop! timers)))
+          (begin
+            #;(printf "got timer request~n")
+            (add-timer (thread-receive))
+            #;(printf "added timer~n"))
+          (begin
+            #;(printf "timer woke up. sending to owner~n")
+            (thread-send owner (heap-pop! timers))))
       (wait (and (heap-any? timers) (secs-until (heap-min timers)))))
 
     (thread (lambda () (wait #f)))))

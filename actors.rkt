@@ -75,9 +75,13 @@
         (case-lambda
           [() (receive)]
           [(timeout-ms timeout-msg)
+           #;(printf "installing timer ~a ~a~n" timeout-ms timeout-msg)
            (install-timer timeout-ms
-                          (lambda () (unless timer-cancelled?
-                                  (send-front p timeout-msg))))
+                          (lambda ()
+                            #;(printf "timer expired~n")
+                            (unless timer-cancelled?
+                              (send-front p timeout-msg))))
+           #;(printf "receiving now...~n")
            (receive)])))
     (define (install-timer timeout-ms action)
       (let ([timer (timer (+ (current-milliseconds) timeout-ms) action)])
@@ -122,13 +126,15 @@
     (pump)))
 
 
-
 (define pumping? (make-parameter #f))
 (define (pump)
   (unless (pumping?)
     (parameterize ([pumping? #t])
       (while (non-empty-queue? *ready*)
-        (continue-process (dequeue! *ready*))))))
+        (continue-process (dequeue! *ready*)))
+      (let ([timer (thread-receive)])
+        ((timer-action timer))))
+    (pump)))
 
 
 ;; example processes
