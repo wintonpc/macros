@@ -4,6 +4,7 @@
 
 (require data/queue)
 (require "util.rkt")
+(require "timer.rkt")
 
 ;; process model
 
