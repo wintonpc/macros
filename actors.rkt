@@ -10,6 +10,7 @@
 
 (define *processes* '())
 (define *ready* (make-queue))
+(define *timer-thread* (start-timer-thread))
 
 (struct process (id mailbox (thunk #:mutable) (alive #:mutable)) #:transparent)
 
@@ -25,6 +26,9 @@
 
 (define (enqueue-msg p msg)
   (enqueue! (process-mailbox p) msg))
+
+(define (prepend-msg p msg)
+  (enqueue-front! (process-mailbox p) msg))
 
 (define (dequeue-msg p)
   (dequeue! (process-mailbox p)))
@@ -50,7 +54,7 @@
 
 (define-syntax (receive stx)
   (syntax-case stx ()
-    [(_) #'((*receive*))]))
+    [(_ arg ...) #'((*receive*) arg ...)]))
 
 
 ;; process engine
@@ -62,17 +66,30 @@
         (lambda () (run (lambda () (cont #f)))))
       (let ([cont (reenter thunk)])
         (set-process-thunk! p (thunkify cont))))
+    (define (make-receive yield)
+      (let ([timer-cancelled? #f])
+        (define (receive)
+          (call/cc yield)
+          (set! timer-cancelled? #t)
+          (dequeue-msg p))
+        (case-lambda
+          [() (receive)]
+          [(timeout-ms timeout-msg)
+           (install-timer timeout-ms
+                          (lambda () (unless timer-cancelled?
+                                  (send-front p timeout-msg))))
+           (receive)])))
+    (define (install-timer timeout-ms action)
+      (let ([timer (timer (+ (current-milliseconds) timeout-ms) action)])
+        (thread-send *timer-thread* timer)))
     (define (reenter thunk)
       (call/cc
           (lambda (yield)
-            (define (receive)
-              (call/cc yield)
-              (dequeue-msg p))
             (parameterize ([*self* p]
-                           [*receive* receive])
+                           [*receive* (make-receive yield)])
               (with-handlers ([exn:fail? on-failure])
                 (thunk)
-                (clean-up "terminated"))))))
+                (clean-up "exited normally"))))))
     (define (clean-up why)
       (printf "process ~a ~a~n" (process-id p) why)
       (set-process-alive! p #f)
@@ -93,10 +110,18 @@
       (error 'terminated)))
 
 (define (send p msg)
+  (send-impl p msg enqueue-msg))
+
+(define (send-front p msg)
+  (send-impl p msg prepend-msg))
+
+(define (send-impl p msg enqueue)
   (when (process-alive p)
-    (enqueue-msg p msg)
+    (enqueue p msg)
     (ready! p)
     (pump)))
+
+
 
 (define pumping? (make-parameter #f))
 (define (pump)
@@ -126,7 +151,7 @@
   (send pong self)
   (let lp ([n 1])
     (when (< n 10)
-      (printf "ping ~a~n" n)
+      (printf "ping: ~a~n" n)
       (send pong n)
       (lp (+ (receive) 1)))))
 
@@ -138,3 +163,10 @@
         (send ping n)
         (lp)))))
     
+(define (poller)
+  (let ([msg (receive 1000 'timeout)])
+    (printf "poller received: ~a~n" msg)
+    (unless (eq? msg 'exit)
+      (printf "poll~n")
+      (poller))))
+      

@@ -23,6 +23,6 @@
           (add-timer (thread-receive))
           (thread-send owner (heap-pop! timers)))
       (wait (and (heap-any? timers) (secs-until (heap-min timers)))))
-    
+
     (thread (lambda () (wait #f)))))
 
